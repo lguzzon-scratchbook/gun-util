@@ -1,10 +1,13 @@
-import typescript from 'rollup-plugin-typescript2';
+import typescript from '@rollup/plugin-typescript';
 import pkg from './package.json';
 
 const outputDefaults = {
     globals: {
         'gun/gun': 'Gun',
         'gun/sea': 'SEA',
+        'gun': 'Gun',
+        'lodash': '_',
+        'moment': 'moment',
     }
 };
 
@@ -15,17 +18,20 @@ export default {
             ...outputDefaults,
             file: pkg.main,
             format: 'cjs',
+            sourcemap: true,
         },
         {
             ...outputDefaults,
             file: pkg.module,
             format: 'es',
+            sourcemap: true,
         },
         {
             ...outputDefaults,
             name: 'GunUtil',
             file: pkg.browser,
             format: 'umd',
+            sourcemap: true,
         },
     ],
     external: [
@@ -36,12 +42,7 @@ export default {
     ],
     plugins: [
         typescript({
-            typescript: require('typescript'),
-            tsconfigOverride: {
-                compilerOptions: {
-                    module: 'ESNext',
-                }
-            }
+            tsconfig: './tsconfig.json',
         }),
     ],
 };
