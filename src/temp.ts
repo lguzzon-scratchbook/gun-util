@@ -12,11 +12,16 @@ export const gunLogOnceFix = (Gun: any) => {
 };
 
 /** Call in case of user is not defined errors. */
-export const fixSea = (Gun: any) => {
+export const fixSea = async (Gun: any) => {
     if (typeof Gun !== 'function') {
         throw new Error('Must specify a Gun constructor');
     }
-    if (!Gun.SEA && !!require) {
-        Gun.SEA = require('gun/sea');
+    if (!Gun.SEA) {
+        try {
+            const sea = await import('gun/sea');
+            Gun.SEA = sea.default || sea;
+        } catch {
+            throw new Error('Could not load gun/sea module');
+        }
     }
 };

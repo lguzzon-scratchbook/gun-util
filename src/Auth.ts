@@ -111,8 +111,7 @@ export default class Auth {
     }
     let userRef = this.gun.user();
     userRef.leave();
-    if (!this.pub()) {
-    } else {
+    if (this.pub()) {
       throw new AuthError('Failed to log out');
     }
   }
@@ -148,18 +147,7 @@ export default class Auth {
     options: AuthBasicOptions = {}
   ): Promise<string> {
     this.logout();
-    return this._beginAuthBlock(async () => {
-      try {
-        return await this._login(creds, options);
-      } catch (error) {
-        if (error instanceof MultipleAuthError) {
-          // Wait for internal work and try again
-          await this._joinInternal();
-          return await this._login(creds, options);
-        }
-        throw error;
-      }
-    });
+    return this._beginAuthBlock(() => this._withRetryOnMultipleAuth(() => this._login(creds, options)));
   }
 
   /**
@@ -171,18 +159,7 @@ export default class Auth {
     options: AuthBasicOptions = {}
   ): Promise<string> {
     this.logout();
-    return this._beginAuthBlock(async () => {
-      try {
-        return await this._create(creds, options);
-      } catch (error) {
-        if (error instanceof MultipleAuthError) {
-          // Wait for internal work and try again
-          await this._joinInternal();
-          return await this._create(creds, options);
-        }
-        throw error;
-      }
-    });
+    return this._beginAuthBlock(() => this._withRetryOnMultipleAuth(() => this._create(creds, options)));
   }
 
   /**
@@ -262,18 +239,7 @@ export default class Auth {
         return await this.login(pair, options);
       }
     } else if (isPlatformWeb()) {
-      return this._beginAuthBlock(async () => {
-        try {
-          return await this._recallSessionStorage(options);
-        } catch (error) {
-          if (error instanceof MultipleAuthError) {
-            // Wait for internal work and try again
-            await this._joinInternal();
-            return await this._recallSessionStorage(options);
-          }
-          throw error;
-        }
-      });
+      return this._beginAuthBlock(() => this._withRetryOnMultipleAuth(() => this._recallSessionStorage(options)));
     } else {
       return undefined;
     }
@@ -338,36 +304,37 @@ export default class Auth {
    * Changes a user's password.
    *
    * **Does not work with Gun v0.2020.520**
+   *
+   * Gun does not provide a native password change API. Use
+   * the `change` option on {@link create} with a new pair,
+   * or implement a custom flow via Gun's SEA.
    */
   async changePass(
     creds: UserCredentials & { newPass: string },
     options: AuthBasicOptions = {}
   ): Promise<string> {
-    this.logout();
-    return this.create(creds, options);
+    throw new GunError(
+      'Password change is not supported in this version of Gun. ' +
+      'Use create() with the `change` option or implement a custom SEA-based flow.'
+    );
   }
 
   /**
    * Deletes a user.
    *
    * **Does not work with Gun v0.2020.520**
+   *
+   * Gun does not provide a reliable user deletion API. Implement
+   * a custom clean-up flow if needed.
    */
   async delete(
     creds: UserCredentials,
     options: AuthBasicOptions = {}
   ): Promise<void> {
-    return this._beginAuthBlock(async () => {
-      try {
-        return await this._delete(creds, options);
-      } catch (error) {
-        if (error instanceof MultipleAuthError) {
-          // Wait for internal work and try again
-          await this._joinInternal();
-          return await this._delete(creds, options);
-        }
-        throw error;
-      }
-    });
+    throw new GunError(
+      'User deletion is not supported in this version of Gun. ' +
+      'Implement a custom clean-up flow if needed.'
+    );
   }
 
   /**
@@ -412,6 +379,25 @@ export default class Auth {
   private _onAuthCallbacks: ((pub: string) => void)[] = [];
 
   private static _default: Auth | undefined;
+
+  private async _withRetryOnMultipleAuth<T>(blockFactory: () => Promise<T>): Promise<T> {
+    try {
+      return await blockFactory();
+    } catch (error) {
+      if (error instanceof MultipleAuthError) {
+        await this._joinInternal();
+        return await blockFactory();
+      }
+      throw error;
+    }
+  }
+
+  private async _withTimeout<T>(promises: Promise<T>[], timeout?: number): Promise<T> {
+    if (timeout && timeout > 0) {
+      promises.push(errorAfter(timeout, new TimeoutError()) as any);
+    }
+    return Promise.race(promises);
+  }
 
   private async _login(
     creds:
@@ -460,8 +446,7 @@ export default class Auth {
           // Check for login anyway
           let pub = this.pub();
           if (pub) {
-            // Actually logged in.
-            // (This is Gun v0.2020.520 behaviour only)
+            // Actually logged in despite reported error (Gun v0.2020.520 behaviour only)
             console.warn(
               'Logged in without login acknowledgement. Your data may not be synced to peers.'
             );
@@ -496,11 +481,7 @@ export default class Auth {
     });
 
     this._gunUserAction = loginAction;
-    let promises = [loginAction, this.on()];
-    if (timeout && timeout > 0) {
-      promises.push(errorAfter(timeout, new TimeoutError()));
-    }
-    return Promise.race(promises);
+    return this._withTimeout([loginAction, this.on()], timeout);
   }
 
   private async _recallSessionStorage(
@@ -534,8 +515,7 @@ export default class Auth {
           // Check for login anyway
           let pub = this.pub();
           if (pub) {
-            // Actually logged in.
-            // (This is Gun v0.2020.520 behaviour only)
+            // Actually logged in despite reported error (Gun v0.2020.520 behaviour only)
             resolveOnce(pub);
           } else if (ack.lack) {
             // Timed out
@@ -607,11 +587,7 @@ export default class Auth {
     });
 
     this._gunUserAction = createAction;
-    let promises = [createAction, this.on()];
-    if (timeout && timeout > 0) {
-      promises.push(errorAfter(timeout, new TimeoutError()));
-    }
-    return Promise.race(promises);
+    return this._withTimeout([createAction, this.on()], timeout);
   }
 
   private async _delete(
@@ -629,11 +605,7 @@ export default class Auth {
       });
     });
     this._gunUserAction = deleteAction;
-    let promises = [deleteAction];
-    if (timeout && timeout > 0) {
-      promises.push(errorAfter(timeout, new TimeoutError()));
-    }
-    return Promise.race(promises);
+    return this._withTimeout([deleteAction], timeout);
   }
 
   private async _joinInternal(): Promise<void> {
@@ -673,7 +645,7 @@ export default class Auth {
   private _addOnAuthCallback(cb: () => void) {
     if (typeof cb !== 'function') {
       throw new Error(
-        'Unvalid auth callback function. Pass a function auth.on().'
+        'Invalid auth callback function. Pass a function auth.on().'
       );
     }
     this._onAuthCallbacks.push(cb);

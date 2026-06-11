@@ -1,9 +1,16 @@
 import { IGunConstructorOptions } from './gun/types/options';
 import { isPlatformWeb } from './support';
 
+function getEnvPeers(): string {
+    if (typeof process !== 'undefined' && process.env) {
+        return process.env.TEST_GUN_PEERS || '';
+    }
+    return '';
+}
+
 export const TEST_GUN_PEERS: string[] = isPlatformWeb()
     ? []
-    : (process.env.TEST_GUN_PEERS || '')
+    : getEnvPeers()
         .split(',')
         .map(peer => peer.trim())
         .filter(peer => !!peer);
