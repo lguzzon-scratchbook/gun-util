@@ -1,4 +1,20 @@
-import _, { findLastKey } from "lodash";
+/**
+ * Binary search: returns the index at which `value` should be inserted
+ * into `arr` to maintain sorted order.
+ */
+function sortedIndex<T extends PrimitiveCastable>(arr: T[], value: T): number {
+    let low = 0;
+    let high = arr.length;
+    while (low < high) {
+        let mid = (low + high) >>> 1;
+        if (arr[mid].valueOf() < value.valueOf()) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    return low;
+}
 
 export interface PrimitiveCastable {
     valueOf: () => string | number;
@@ -74,13 +90,16 @@ export function filteredIndexRange<T extends PrimitiveCastable>(keys: T[], range
     let {
         start,
         end,
-        startClosed = true,
-        endClosed = false,
+        startClosed,
+        endClosed,
     } = range;
+    // Defaults when start/end are undefined
+    if (typeof start === 'undefined') startClosed = true;
+    if (typeof end === 'undefined') endClosed = false;
 
     let iStart = 0;
     if (typeof start !== 'undefined') {
-        iStart = _.sortedIndex(keys, start);
+        iStart = sortedIndex(keys, start);
         let key = keys[iStart];
         if (key <= start && !startClosed) {
             iStart += 1;
@@ -89,7 +108,7 @@ export function filteredIndexRange<T extends PrimitiveCastable>(keys: T[], range
     // iEnd is inclusive here
     let iEnd = len - 1;
     if (typeof end !== 'undefined') {
-        iEnd = _.sortedIndex(keys, end);
+        iEnd = sortedIndex(keys, end);
         let key = keys[iEnd];
         if (key >= end && !endClosed) {
             iEnd -= 1;
@@ -154,16 +173,20 @@ export function filterWithRange<T>(range: ValueRange<T>): Filter<T> {
     } = range;
     let filter: Filter<T> = {};
 
-    if (startClosed) {
-        filter.gte = start;
-    } else {
-        filter.gt = start;
+    if (typeof start !== 'undefined') {
+        if (startClosed) {
+            filter.gte = start;
+        } else {
+            filter.gt = start;
+        }
     }
 
-    if (endClosed) {
-        filter.lte = end;
-    } else {
-        filter.lt = end;
+    if (typeof end !== 'undefined') {
+        if (endClosed) {
+            filter.lte = end;
+        } else {
+            filter.lt = end;
+        }
     }
 
     return filter;
@@ -182,7 +205,7 @@ export function mapValueRange<U, V>(range: ValueRange<U>, map: (v: U) => V): Val
  * Create a closed filter from an open filter,
  * preserving any other properties on the object.
  **/
-export function closedFilter<T>(filter: Filter<T> & { [x: string] : any }): Filter<T> & { [x: string] : any } {
+export function closedFilter<T extends Record<string, any>>(filter: T): T {
     // Extract filter
     let {
         gt, gte, lt, lte,

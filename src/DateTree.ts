@@ -1,5 +1,4 @@
 import { IGunChainReference } from "./gun/types/chain";
-import _ from 'lodash';
 import moment, { Moment } from 'moment';
 import { IterateOptions, iterateRefs } from "./iterate";
 import {
@@ -104,10 +103,7 @@ export default class DateTree<T = any> {
      */
     on(cb: DateEventCallback<T>, opts: DateEventOptions = {}): IGunSubscription {
         // TODO: add updates support
-        let range = mapValueRange(
-            rangeWithFilter(opts),
-            x => DateTree.parseDate(x, this.resolution),
-        );
+        let range = this._parseDateRange(opts);
         let { start, end } = range;
 
         if (!start && !end) {
@@ -253,7 +249,7 @@ export default class DateTree<T = any> {
         let comps = DateTree.getDateComponents(m, this.resolution);
         let units = Object.keys(comps);
         let refs = this._getRefChain(comps);
-        let refTable = _.zipObject(units, refs);
+        let refTable = Object.fromEntries(units.map((k, i) => [k, refs[i]]));
         let subTable: { [unit: string]: IGunSubscription } = {};
         let didUnsub = false;
 
@@ -270,10 +266,12 @@ export default class DateTree<T = any> {
             }
         };
 
-        _.forIn(refTable, (ref: any, unit: string) => {
+        Object.keys(refTable).forEach(unit => {
+            let ref = (refTable as any)[unit];
             subTable[unit] = subscribe(ref, (changes, outerKey, at, sub) => {
                 // Get data
-                _.forIn(changes, (val, key) => {
+                Object.keys(changes).forEach(key => {
+                    let val = changes[key];
                     if (key === '_') {
                         // Meta
                         return;
@@ -295,6 +293,7 @@ export default class DateTree<T = any> {
                         callback(changeComps, commonSub);
                     } catch (error) {
                         console.error(`Uncaught error in DateTree: ${error}`);
+                        throw error;
                     }
                 });
             }, { change: true });
@@ -344,7 +343,7 @@ export default class DateTree<T = any> {
             throw new Error('Invalid Gun node reference. Expected a leaf on the date tree.');
         }
         let values = keys.map(k => DateTree.decodeDateComponent(k));
-        let comps: DateComponentsUnsafe = _.zipObject(units, values);
+        let comps: DateComponentsUnsafe = Object.fromEntries(units.map((k, i) => [k, values[i]]));
         return DateTree.getDateWithComponents(comps);
     }
 
@@ -368,11 +367,11 @@ export default class DateTree<T = any> {
     private _getRefChain(comps: DateComponents): IGunChainReference[] {
         let ref = this.root;
         let refs = [ref];
-        _.forIn(comps, (val, unit) => {
+        for (const [unit, val] of Object.entries(comps)) {
             let key = DateTree.encodeDateComponent(val, unit as DateUnit)!;
             ref = ref.get(key);
             refs.push(ref);
-        });
+        }
         return refs;
     }
 
@@ -460,10 +459,7 @@ export default class DateTree<T = any> {
      * @param param0 
      */
     async * iterate(opts: DateIterateOptions = {}): AsyncGenerator<[IGunChainReference<T>, Moment]> {
-        let range = mapValueRange(
-            rangeWithFilter(opts),
-            x => DateTree.parseDate(x, this.resolution),
-        );
+        let range = this._parseDateRange(opts);
         let { start, end } = range;
         let { order } = opts;
         let ref: IGunChainReference | undefined = this.root;
@@ -566,12 +562,11 @@ export default class DateTree<T = any> {
         return units;
     }
 
-    static lowerUnit(unit: DateUnit): DateUnit | undefined {
-        let i = ALL_DATE_UNITS.indexOf(unit);
-        if (i < 0) {
-            return undefined;
-        }
-        return ALL_DATE_UNITS[i - 1];
+    private _parseDateRange(opts: DateEventOptions | DateIterateOptions): ValueRange<Moment> {
+        return mapValueRange(
+            rangeWithFilter(opts),
+            x => DateTree.parseDate(x, this.resolution),
+        );
     }
 
     static getDateWithComponents(comps: DateComponents, resolution?: DateUnit): Moment {
@@ -641,7 +636,6 @@ export default class DateTree<T = any> {
     }
 
     static decodeDateComponent(key: string): number {
-        // TODO: validate key in case there is unexpected data in the tree
         return Math.round(parseFloat(key));
     }
 
@@ -695,7 +689,7 @@ export default class DateTree<T = any> {
 
         if (typeof startVal !== 'undefined') {
             let upStartComps = this.downsampleDateComponents(startComps, upUnit);
-            if (!_.isEqual(upStartComps, upComps)) {
+            if (JSON.stringify(upStartComps) !== JSON.stringify(upComps)) {
                 // Expand start
                 startVal = undefined;
             }
@@ -703,7 +697,7 @@ export default class DateTree<T = any> {
 
         if (typeof endVal !== 'undefined') {
             let upEndComps = DateTree.downsampleDateComponents(endComps, upUnit);
-            if (!_.isEqual(upEndComps, upComps)) {
+            if (JSON.stringify(upEndComps) !== JSON.stringify(upComps)) {
                 // Expand end
                 endVal = undefined;
             }
@@ -807,14 +801,14 @@ const nativeDateValue = (value: number, res: DateUnit): number => {
 const MIN_DATE_COMPONENTS: Omit<{ readonly [K in DateUnit]: number }, 'year'> = (() => {
     let maxDate = moment.utc().startOf('year');
     let units = ALL_DATE_UNITS.slice(1);
-    return _.zipObject(units, units.map(r => graphDateValue(maxDate.get(nativeDateUnit(r)), r))) as any;
+    return Object.fromEntries(units.map(r => [r, graphDateValue(maxDate.get(nativeDateUnit(r)), r)])) as any;
 })();
 
 /** The maximum (exclusive) date component values. */
 const MAX_DATE_COMPONENTS: Omit<{ readonly [K in DateUnit]: number }, 'year'> = (() => {
     let maxDate = moment.utc().endOf('year');
     let units = ALL_DATE_UNITS.slice(1);
-    return _.zipObject(units, units.map(r => graphDateValue(maxDate.get(nativeDateUnit(r)), r) + 1)) as any;
+    return Object.fromEntries(units.map(r => [r, graphDateValue(maxDate.get(nativeDateUnit(r)), r) + 1])) as any;
 })();
 
 const DATE_COMP_PADS: { readonly [K in DateUnit]: number } = (() => {
@@ -831,17 +825,3 @@ const DATE_COMP_PADS: { readonly [K in DateUnit]: number } = (() => {
 })();
 
 // /** The set of all possible keys of a date component. */
-// const DATE_COMPONENT_KEY_SETS: Omit<{ readonly [K in DateUnit]: Set<string> }, 'year'> = (() => {
-//     let sets: Partial<Omit<{ [K in DateUnit]: Set<string> }, 'year'>> = {};
-//     for (let unit of ALL_DATE_UNITS) {
-//         if (unit === 'year') continue;
-//         let min = MIN_DATE_COMPONENTS[unit];
-//         let max = MIN_DATE_COMPONENTS[unit];
-//         let set = new Set<string>();
-//         for (let i = min; i < max; i++) {
-//             set.add(DateTree.encodeDateComponent(i, unit)!);
-//         }
-//         sets[unit] = set;
-//     }
-//     return sets as Omit<{ readonly [K in DateUnit]: Set<string> }, 'year'>;
-// })();

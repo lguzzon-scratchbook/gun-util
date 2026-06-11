@@ -1,5 +1,4 @@
 import Gun from 'gun';
-import _ from 'lodash';
 import { IGunCryptoKeyPair } from './gun/types/types';
 
 interface CryptOptionsBase {
@@ -122,24 +121,25 @@ async function _mapDeep(
         case 'undefined':
             return undefined;
         case 'object':
-            if (_.isArrayLike(data)) {
+            if (Array.isArray(data)) {
                 // Array
                 return Promise.all(
-                    _.map(data, x => _mapDeep(x, map, opts))
+                    data.map(x => _mapDeep(x, map, opts))
                 );
             }
             // Object
             let meta = data._;
             if (meta) {
                 // Remove meta
-                data = _.omit(data, '_');
+                let { _: _removed, ...rest } = data;
+                data = rest;
             }
             let keys = Object.keys(data);
             let rawValues = Object.values(data);
             let values = await Promise.all(
                 rawValues.map(x => _mapDeep(x, map, opts))
             );
-            let result = _.zipObject(keys, values);
+            let result = Object.fromEntries(keys.map((k, i) => [k, values[i]]));
             if (meta) {
                 result = { _: meta, ...result };
             }
